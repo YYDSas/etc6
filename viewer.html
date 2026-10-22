@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#ffffff">
+<title>查看解析</title>
+<style>
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;padding:0}
+body{background:#e9ebef;color:#16181d;font:15px/1.5 -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+  padding-top:calc(52px + env(safe-area-inset-top))}
+@media (prefers-color-scheme:dark){body{background:#0b0d11;color:#e9eaec}}
+#bar{position:fixed;top:0;left:0;right:0;z-index:20;display:flex;align-items:center;gap:10px;
+  height:calc(52px + env(safe-area-inset-top));padding:env(safe-area-inset-top) 12px 0;
+  background:rgba(255,255,255,.94);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+  border-bottom:1px solid rgba(0,0,0,.08)}
+@media (prefers-color-scheme:dark){#bar{background:rgba(22,25,31,.94);border-bottom-color:rgba(255,255,255,.08)}}
+#back{flex:0 0 auto;width:34px;height:34px;display:flex;align-items:center;justify-content:center;
+  text-decoration:none;color:inherit;font-size:26px;line-height:1;border-radius:9px}
+#back:active{background:rgba(128,128,128,.18)}
+#ttl{flex:1 1 auto;min-width:0;font-size:13.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#pg{flex:0 0 auto;font-size:12.5px;color:#6b7280;font-variant-numeric:tabular-nums}
+@media (prefers-color-scheme:dark){#pg{color:#9aa1ab}}
+#dl{flex:0 0 auto;width:34px;height:34px;display:flex;align-items:center;justify-content:center;
+  text-decoration:none;color:#2563eb;font-size:17px;border-radius:9px}
+#dl:active{background:rgba(37,99,235,.14)}
+#wrap{padding:10px 0 48px}
+.ph{margin:0 auto 10px;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.13);overflow:hidden}
+.ph canvas{display:block;width:100%;height:auto}
+#hint{padding:40px 24px;text-align:center;color:#6b7280;font-size:14px;line-height:1.8}
+@media (prefers-color-scheme:dark){#hint{color:#9aa1ab}}
+</style>
+</head>
+<body>
+<div id="bar">
+  <a id="back" href="index.html" aria-label="返回">‹</a>
+  <div id="ttl">加载中…</div>
+  <span id="pg"></span>
+  <a id="dl" href="#" download aria-label="下载原文件">↓</a>
+</div>
+<div id="wrap"></div>
+<div id="hint">正在加载 PDF…</div>
+<script src="vendor/pdf.min.js"></script>
+<script>
+(function () {
+  var wrap = document.getElementById('wrap');
+  var ttl = document.getElementById('ttl');
+  var pgEl = document.getElementById('pg');
+  var hint = document.getElementById('hint');
+  var dl = document.getElementById('dl');
+
+  var f = new URLSearchParams(location.search).get('f');
+  if (!f) { hint.textContent = '缺少文件参数，请从列表页进入。'; return; }
+
+  var nice = decodeURIComponent(f).split('/').pop().replace(/\.pdf$/i, '');
+  ttl.textContent = nice;
+  document.title = nice;
+  dl.href = f;
+
+  pdfjsLib.GlobalWorkerOptions.workerSrc = 'vendor/pdf.worker.min.js';
+
+  var pdf = null, pages = [], io = null;
+
+  function renderPage(n) {
+    var it = pages[n];
+    if (!it || it.done || it.busy) return;
+    it.busy = true;
+    pdf.getPage(n).then(function (page) {
+      var base = page.getViewport({ scale: 1 });
+      var scale = wrap.clientWidth / base.width;
+      var vp = page.getViewport({ scale: scale });
+      var dpr = Math.min(window.devicePixelRatio || 1, 2);
+      var cv = document.createElement('canvas');
+      cv.width = Math.floor(vp.width * dpr);
+      cv.height = Math.floor(vp.height * dpr);
+      var ctx = cv.getContext('2d');
+      return page.render({
+        canvasContext: ctx,
+        viewport: vp,
+        transform: [dpr, 0, 0, dpr, 0, 0]
+      }).promise.then(function () {
+        it.ph.style.height = vp.height + 'px';
+        it.ph.innerHTML = '';
+        it.ph.appendChild(cv);
+        it.done = true;
+        if (n === 1) hint.style.display = 'none';
+      });
+    }).catch(function (e) {
+      it.ph.style.height = 'auto';
+      it.ph.style.padding = '16px';
+      it.ph.textContent = '第 ' + n + ' 页渲染失败：' + e.message;
+    });
+  }
+
+  function updatePg() {
+    if (!pdf) return;
+    var mid = window.scrollY + window.innerHeight * 0.35;
+    var cur = 1;
+    for (var i = 1; i < pages.length; i++) {
+      if (pages[i] && pages[i].ph.offsetTop <= mid) cur = i; else break;
+    }
+    pgEl.textContent = cur + ' / ' + pdf.numPages;
+  }
+
+  var ticking = false;
+  window.addEventListener('scroll', function () {
+    if (ticking) return;
+    ticking = true;
+    requestAnimationFrame(function () { updatePg(); ticking = false; });
+  }, { passive: true });
+
+  pdfjsLib.getDocument({
+    url: f,
+    cMapUrl: 'vendor/cmaps/',
+    cMapPacked: true,
+    standardFontDataUrl: 'vendor/standard_fonts/'
+  }).promise.then(function (doc) {
+    pdf = doc;
+    return doc.getPage(1).then(function (p1) {
+      var v1 = p1.getViewport({ scale: 1 });
+      var ratio = v1.height / v1.width;
+      var h = Math.round(wrap.clientWidth * ratio);
+      io = new IntersectionObserver(function (entries) {
+        for (var i = 0; i < entries.length; i++) {
+          if (entries[i].isIntersecting) renderPage(+entries[i].target.dataset.n);
+        }
+      }, { rootMargin: '900px 0px' });
+      for (var i = 1; i <= doc.numPages; i++) {
+        var ph = document.createElement('div');
+        ph.className = 'ph';
+        ph.dataset.n = i;
+        ph.style.height = h + 'px';
+        wrap.appendChild(ph);
+        pages[i] = { ph: ph, done: false, busy: false };
+        io.observe(ph);
+      }
+      renderPage(1);
+      updatePg();
+      hint.style.display = 'none';
+    });
+  }).catch(function (e) {
+    hint.textContent = '加载失败：' + e.message + '。可点右上角 ↓ 下载原文件。';
+  });
+})();
+</script>
+</body>
+</html>
