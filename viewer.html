@@ -55,7 +55,9 @@ body{background:#e9ebef;color:#16181d;font:15px/1.5 -apple-system,BlinkMacSystem
   var name = decodeURIComponent(f).split('/').pop().replace(/\.pdf$/i, '');
   ttl.textContent = name;
   document.title = name;
-  dl.href = f;
+  var hasPdf = f.indexOf('full/') !== 0;   // 整套答案只存分页图，没有可下载的原 PDF
+  if (hasPdf) dl.href = f; else dl.style.display = 'none';
+  if (!hasPdf) document.getElementById('back').href = 'full.html';
 
   var dir = f.replace(/\.pdf$/i, '').split('/').map(encodeURIComponent).join('/');
 
@@ -101,7 +103,7 @@ body{background:#e9ebef;color:#16181d;font:15px/1.5 -apple-system,BlinkMacSystem
       upd();
     })
     .catch(function (e) {
-      hint.textContent = '加载失败：' + e.message + '。可点右上角 ↓ 下载原文件。';
+      hint.textContent = '加载失败：' + e.message + (hasPdf ? '。可点右上角 ↓ 下载原文件。' : '。请稍后重试。');
     });
 })();
 </script>
